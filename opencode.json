@@ -1,0 +1,86 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md"],
+  "model": "zai-coding-plan/glm-4.6",
+  "agent": {
+    "plan": {
+      "description": "Agent de planification qui analyse le projet avant toute action",
+      "mode": "primary",
+      "model": "zai-coding-plan/glm-4.6",
+      "temperature": 0.1,
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": false
+      }
+    },
+    "build": {
+      "description": "Agent de développement qui implémente les changements",
+      "mode": "primary",
+      // "model": "moonshotai/kimi-k2-0905-preview",
+      "model": "zai-coding-plan/glm-4.6",
+      "temperature": 0.2,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow",
+        "webfetch": "allow"
+      }
+    }
+  },
+  "permission": {
+    "edit": "allow",
+    "webfetch": "allow",
+    "bash": {
+      "npm run dev": "deny"
+    }
+  },
+  "mcp": {
+    "supabase": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--project-ref=wlrrruemchacgyypexsu"
+      ],
+      "enabled": true,
+      "environment": {
+        "SUPABASE_ACCESS_TOKEN": "sbp_05a6d5dfc482299fe197d2b3beac278465255396"
+      }
+    },
+    "web-search-prime": {
+      "type": "remote",
+      "url": "https://api.z.ai/api/mcp/web_search_prime/mcp",
+      "headers": {
+        "Authorization": "a658fdcc71e545d4b99eb83537a7182e.1HMfx0E47HCLUUGd"
+      }
+      // },
+      // "serena": {
+      //   "type": "local",
+      //   "command": [
+      //     "/home/charles/.local/bin/uvx",
+      //     "--from",
+      //     "git+https://github.com/oraios/serena",
+      //     "serena",
+      //     "start-mcp-server"
+      //   ],
+      //   "enabled": true
+    },
+    "chrome-devtools": {
+      "type": "local",
+      "command": ["npx", "-y", "chrome-devtools-mcp@latest"],
+      "enabled": true
+    },
+    "context7": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@upstash/context7-mcp",
+        "--api-key",
+        "ctx7sk-b3b714ac-8eda-4108-894b-5a95a2212ea3"
+      ],
+      "enabled": true
+    }
+  }
+}
