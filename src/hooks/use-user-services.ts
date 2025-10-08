@@ -2,9 +2,9 @@
 // Using TanStack Query best practices with optimistic updates and RLS-aware error handling
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
-import { authStore } from '../lib/store'
+import { useAuth } from '../contexts/AuthContext'
 import { queryKeys } from '../lib/query-keys'
-import { createCRUDHooks } from '../lib/crud/create-crud-hooks'
+
 import { handleMutationError } from '../lib/crud/error-handling'
 import type { Row, UpdateRow } from '../lib/database-types'
 
@@ -12,27 +12,7 @@ import type { Row, UpdateRow } from '../lib/database-types'
 type UserService = Row<'user_services'>
 type UserServiceUpdate = UpdateRow<'user_services'>
 
-// Get current user ID from auth store
-const getCurrentUserId = () => authStore.state.user?.id
-
-// Create CRUD hooks for user_services table
-const servicesCRUD = createCRUDHooks<'user_services'>({
-  tableName: 'user_services',
-  queryKeys: {
-    all: queryKeys.services.all,
-    lists: queryKeys.services.lists,
-    list: queryKeys.services.list,
-    details: queryKeys.services.details,
-    detail: queryKeys.services.detail,
-  },
-})
-
-// Export basic CRUD hooks from the factory
-export const useUserService = servicesCRUD.useById
-export const useUserServicesList = servicesCRUD.useList
-export const useCreateUserService = servicesCRUD.useCreate
-export const useUpdateUserService = servicesCRUD.useUpdate
-export const useDeleteUserService = servicesCRUD.useDelete
+// User services hooks refactored to use service layer
 
 // Specialized hooks for services
 
@@ -62,7 +42,8 @@ export function useServicesByProfile(profileId?: string) {
  * Hook to get current user's services
  */
 export function useCurrentUserServices() {
-  const userId = getCurrentUserId()
+  const { user } = useAuth()
+  const userId = user?.id
   return useServicesByProfile(userId)
 }
 

@@ -1,33 +1,10 @@
-// Chat CRUD hooks with mobile-first optimizations
+// Chat hooks refactored to use service layer pattern
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '../lib/supabase'
 import { queryKeys } from '../lib/query-keys'
-import { createCRUDHooks } from '../lib/crud/create-crud-hooks'
 import { handleMutationError } from '../lib/crud/error-handling'
-import type { Row } from '../lib/database-types'
+import { chatService } from '../services/chat.service'
 
-type Chat = Row<'chat'>
-
-// Create base CRUD hooks for chat
-const chatHooks = createCRUDHooks<'chat'>({
-  tableName: 'chat',
-  queryKeys: {
-    all: queryKeys.chat.all,
-    lists: queryKeys.chat.lists,
-    list: queryKeys.chat.list,
-    details: queryKeys.chat.details,
-    detail: queryKeys.chat.detail,
-  },
-})
-
-// Export the basic CRUD hooks from the factory
-export const useChatList = chatHooks.useList
-export const useChatById = chatHooks.useById
-export const useChatCreate = chatHooks.useCreate
-export const useChatUpdate = chatHooks.useUpdate
-export const useChatDelete = chatHooks.useDelete
-
-// Chat queries with mobile-first optimizations
+// Chat queries refactored to use service layer
 export function useChatMessagesByChannel(
   channelId: string,
   options?: {
@@ -37,58 +14,7 @@ export function useChatMessagesByChannel(
 ) {
   return useQuery({
     queryKey: queryKeys.chat.byChannel(channelId),
-    queryFn: async () => {
-      let query = supabase
-        .from('chat')
-        .select(
-          `
-          *,
-          profiles:user_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          ),
-          reply_message:reply_to (
-            id,
-            content,
-            user_id,
-            created_at
-          )
-        `,
-        )
-        .eq('channel_id', channelId)
-        .order('created_at', { ascending: true })
-
-      if (options?.limit) {
-        query = query.limit(options.limit)
-      }
-      if (options?.offset) {
-        query = query.range(
-          options.offset,
-          options.offset + (options.limit || 50) - 1,
-        )
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-      return data as Array<
-        Chat & {
-          profiles: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-          reply_message: {
-            id: string
-            content: string
-            user_id: string | null
-            created_at: string
-          } | null
-        }
-      >
-    },
+    queryFn: () => chatService.getMessagesByChannel(channelId, options),
     enabled: !!channelId,
     staleTime: 30 * 1000, // 30 seconds for chat messages
   })
@@ -103,27 +29,7 @@ export function useChatMessagesByUser(
 ) {
   return useQuery({
     queryKey: queryKeys.chat.byUser(userId),
-    queryFn: async () => {
-      let query = supabase
-        .from('chat')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-
-      if (options?.limit) {
-        query = query.limit(options.limit)
-      }
-      if (options?.offset) {
-        query = query.range(
-          options.offset,
-          options.offset + (options.limit || 50) - 1,
-        )
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-      return data as Array<Chat>
-    },
+    queryFn: () => chatService.getMessagesByUser(userId, options),
     enabled: !!userId,
     staleTime: 2 * 60 * 1000, // 2 minutes for user messages
   })
@@ -132,35 +38,7 @@ export function useChatMessagesByUser(
 export function useChatReplies(messageId: string) {
   return useQuery({
     queryKey: queryKeys.chat.replies(messageId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('chat')
-        .select(
-          `
-          *,
-          profiles:user_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .eq('reply_to', messageId)
-        .order('created_at', { ascending: true })
-
-      if (error) throw error
-      return data as Array<
-        Chat & {
-          profiles: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-        }
-      >
-    },
+    queryFn: () => chatService.getMessageReplies(messageId),
     enabled: !!messageId,
     staleTime: 30 * 1000, // 30 seconds for replies
   })
@@ -175,90 +53,22 @@ export function useChatSearch(
 ) {
   return useQuery({
     queryKey: queryKeys.chat.search(searchQuery),
-    queryFn: async () => {
-      let query = supabase
-        .from('chat')
-        .select(
-          `
-          *,
-          profiles:user_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .ilike('content', `%${searchQuery}%`)
-        .order('created_at', { ascending: false })
-
-      if (options?.channelId) {
-        query = query.eq('channel_id', options.channelId)
-      }
-
-      if (options?.limit) {
-        query = query.limit(options.limit)
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-      return data as Array<
-        Chat & {
-          profiles: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-        }
-      >
-    },
+    queryFn: () => chatService.searchMessages(searchQuery, options),
     enabled: !!searchQuery && searchQuery.length >= 2,
     staleTime: 5 * 60 * 1000, // 5 minutes for search results
   })
 }
 
-// Specialized mutations for chat
+// Specialized mutations refactored to use service layer
 export function useSendMessage() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (messageData: {
+    mutationFn: (messageData: {
       channel_id: string
       content: string
       reply_to?: string
-    }) => {
-      const { data, error } = await supabase
-        .from('chat')
-        .insert({
-          channel_id: messageData.channel_id,
-          content: messageData.content,
-          reply_to: messageData.reply_to,
-          // user_id will be automatically set by RLS policy using auth.uid()
-        })
-        .select(
-          `
-          *,
-          profiles:user_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .single()
-
-      if (error) throw error
-      return data as Chat & {
-        profiles: {
-          id: string
-          username: string | null
-          full_name: string | null
-          avatar_url: string | null
-        } | null
-      }
-    },
+    }) => chatService.sendMessage(messageData),
     onMutate: async (newMessage) => {
       // Cancel outgoing refetches
       await queryClient.cancelQueries({
@@ -266,12 +76,12 @@ export function useSendMessage() {
       })
 
       // Snapshot previous state
-      const previousData = queryClient.getQueryData<Array<Chat>>(
+      const previousData = queryClient.getQueryData(
         queryKeys.chat.byChannel(newMessage.channel_id),
       )
 
       // Optimistically add the new message
-      const optimisticMessage: Chat = {
+      const optimisticMessage = {
         channel_id: newMessage.channel_id,
         content: newMessage.content,
         reply_to: newMessage.reply_to,
@@ -279,25 +89,29 @@ export function useSendMessage() {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         is_edited: false,
-        // user_id will be set by RLS, we don't know it client-side
-      } as Chat
+        user_id: null, // Will be filled by real-time update
+        profiles: null, // Will be filled by real-time update
+      }
 
-      queryClient.setQueryData<Array<Chat>>(
+      queryClient.setQueryData(
         queryKeys.chat.byChannel(newMessage.channel_id),
-        (old = []) => [...old, optimisticMessage],
+        (old: Array<any> = []) => [...old, optimisticMessage],
       )
 
-      return { previousData }
+      return { previousData, optimisticMessage }
     },
-    onError: (error, variables, context) => {
+    onError: (_error, variables, context) => {
       // Rollback on error
-      if (context?.previousData) {
+      if (context && context.previousData) {
         queryClient.setQueryData(
           queryKeys.chat.byChannel(variables.channel_id),
-          context.previousData,
+          (old: Array<any> = []) =>
+            old.filter(
+              (message: any) => message.id !== context.optimisticMessage.id,
+            ),
         )
       }
-      handleMutationError(error, 'create')
+      handleMutationError(_error, 'create')
     },
     onSettled: (_data, _error, variables) => {
       // Always refetch after error or success
@@ -312,62 +126,27 @@ export function useEditMessage() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ id, content }: { id: string; content: string }) => {
-      const { data, error } = await supabase
-        .from('chat')
-        .update({
-          content,
-          is_edited: true,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id)
-        // RLS will automatically ensure user can only edit their own messages
-        .select(
-          `
-          *,
-          profiles:user_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .single()
-
-      if (error) throw error
-      return data as Chat & {
-        profiles: {
-          id: string
-          username: string | null
-          full_name: string | null
-          avatar_url: string | null
-        } | null
-      }
-    },
+    mutationFn: ({ id, content }: { id: string; content: string }) =>
+      chatService.editMessage(id, content),
     onMutate: async ({ id, content }) => {
       // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: queryKeys.chat.lists() })
 
       // Snapshot previous state
-      const previousData = queryClient.getQueryData<Array<Chat>>(
-        queryKeys.chat.lists(),
-      )
+      const previousData = queryClient.getQueryData(queryKeys.chat.lists())
 
       // Optimistically update the message
-      queryClient.setQueryData<Array<Chat>>(
-        queryKeys.chat.lists(),
-        (old = []) =>
-          old.map((message) =>
-            message.id === id
-              ? {
-                  ...message,
-                  content,
-                  is_edited: true,
-                  updated_at: new Date().toISOString(),
-                }
-              : message,
-          ),
+      queryClient.setQueryData(queryKeys.chat.lists(), (old: Array<any> = []) =>
+        old.map((message: any) =>
+          message.id === id
+            ? {
+                ...message,
+                content,
+                is_edited: true,
+                updated_at: new Date().toISOString(),
+              }
+            : message,
+        ),
       )
 
       return { previousData }
@@ -394,25 +173,17 @@ export function useDeleteMessage() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('chat').delete().eq('id', id)
-      // RLS will automatically ensure user can only delete their own messages
-      if (error) throw error
-      return id
-    },
+    mutationFn: (id: string) => chatService.deleteMessage(id).then(() => id),
     onMutate: async (id) => {
       // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: queryKeys.chat.lists() })
 
       // Snapshot previous state
-      const previousData = queryClient.getQueryData<Array<Chat>>(
-        queryKeys.chat.lists(),
-      )
+      const previousData = queryClient.getQueryData(queryKeys.chat.lists())
 
       // Optimistically remove the message
-      queryClient.setQueryData<Array<Chat>>(
-        queryKeys.chat.lists(),
-        (old = []) => old.filter((message) => message.id !== id),
+      queryClient.setQueryData(queryKeys.chat.lists(), (old: Array<any> = []) =>
+        old.filter((message: any) => message.id !== id),
       )
 
       return { previousData }

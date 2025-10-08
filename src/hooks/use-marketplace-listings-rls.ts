@@ -1,11 +1,13 @@
 // Additional utility hooks for marketplace listings with RLS compliance
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '../lib/supabase'
 import { queryKeys } from '../lib/query-keys'
 import { handleMutationError } from '../lib/crud/error-handling'
+import { MarketplaceService } from '../services/marketplace.service'
 import type { Row } from '../lib/database-types'
 
 type MarketplaceListing = Row<'marketplace_listings'>
+
+const marketplaceService = new MarketplaceService()
 
 /**
  * Hook to get current user's marketplace listings (all statuses)
@@ -15,19 +17,10 @@ export function useMyMarketplaceListings() {
   return useQuery({
     queryKey: ['my-marketplace-listings'],
     queryFn: async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+      const user = await marketplaceService.getCurrentUser()
       if (!user) throw new Error('User not authenticated')
 
-      const { data, error } = await supabase
-        .from('marketplace_listings')
-        .select('*')
-        .eq('profile_id', user.id)
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      return data as Array<MarketplaceListing>
+      return marketplaceService.getListingsByProfile(user.id)
     },
     enabled: true, // Will be handled by RLS if not authenticated
     staleTime: 5 * 60 * 1000, // 5 minutes
@@ -49,66 +42,11 @@ export function usePublicMarketplaceListings(filters?: {
 }) {
   return useQuery({
     queryKey: ['public-marketplace-listings', filters],
-    queryFn: async () => {
-      let query = supabase.from('marketplace_listings').select(
-        `
-          *,
-          profiles (
-            id,
-            username,
-            full_name,
-            avatar_url,
-            profile_location_associations (
-              locations (
-                id,
-                block,
-                lot
-              )
-            )
-          )
-        `,
-        { count: 'exact' },
-      )
-
-      // RLS will automatically filter to is_active = true for public viewing
-      // Apply additional filters
-      if (filters?.category) {
-        query = query.eq('category', filters.category)
-      }
-      if (filters?.listingType) {
-        query = query.eq('listing_type', filters.listingType)
-      }
-      if (filters?.priceMin !== undefined) {
-        query = query.gte('price', filters.priceMin)
-      }
-      if (filters?.priceMax !== undefined) {
-        query = query.lte('price', filters.priceMax)
-      }
-      if (filters?.search) {
-        query = query.or(
-          `title.ilike.%${filters.search}%,description.ilike.%${filters.search}%,category.ilike.%${filters.search}%`,
-        )
-      }
-
-      query = query
-        .order('is_featured', { ascending: false })
-        .order('created_at', { ascending: false })
-
-      if (filters?.limit) {
-        query = query.limit(filters.limit)
-      }
-      if (filters?.offset) {
-        query = query.range(
-          filters.offset,
-          filters.offset + (filters.limit || 10) - 1,
-        )
-      }
-
-      const { data, error, count } = await query
-      if (error) throw error
-
-      return { data, count }
-    },
+    queryFn: () =>
+      marketplaceService.getListings({
+        ...filters,
+        active: true, // Ensure only active listings
+      }),
     staleTime: 2 * 60 * 1000, // 2 minutes
   })
 }
@@ -120,31 +58,7 @@ export function usePublicMarketplaceListings(filters?: {
 export function useCanManageListing(listingId?: string) {
   return useQuery({
     queryKey: ['can-manage-listing', listingId],
-    queryFn: async () => {
-      if (!listingId) return false
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) return false
-
-      // Check if user owns the listing or is admin
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('is_admin')
-        .eq('id', user.id)
-        .single()
-
-      if (profile?.is_admin) return true
-
-      const { data: listing } = await supabase
-        .from('marketplace_listings')
-        .select('profile_id')
-        .eq('id', listingId)
-        .single()
-
-      return listing?.profile_id === user.id
-    },
+    queryFn: () => marketplaceService.canManageListing(listingId!),
     enabled: !!listingId,
     staleTime: 5 * 60 * 1000, // 5 minutes
   })
@@ -160,9 +74,7 @@ export function useSafeCreateMarketplaceListing() {
     mutationFn: async (
       newData: Omit<MarketplaceListing, 'id' | 'created_at' | 'updated_at'>,
     ) => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+      const user = await marketplaceService.getCurrentUser()
       if (!user) throw new Error('User not authenticated')
 
       // Ensure profile_id matches authenticated user
@@ -171,14 +83,7 @@ export function useSafeCreateMarketplaceListing() {
         profile_id: user.id,
       }
 
-      const { data, error } = await supabase
-        .from('marketplace_listings')
-        .insert(listingData)
-        .select()
-        .single()
-
-      if (error) throw error
-      return data as MarketplaceListing
+      return marketplaceService.createListing(listingData)
     },
     onMutate: async (newData) => {
       await queryClient.cancelQueries({ queryKey: ['my-marketplace-listings'] })

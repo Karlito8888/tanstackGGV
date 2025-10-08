@@ -3,6 +3,7 @@ import viteReact from '@vitejs/plugin-react'
 import viteTsConfigPaths from 'vite-tsconfig-paths'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
+import { TanStackRouterVite } from '@tanstack/router-plugin/vite'
 
 const config = defineConfig({
   plugins: [
@@ -10,6 +11,7 @@ const config = defineConfig({
     viteTsConfigPaths({
       projects: ['./tsconfig.json'],
     }),
+    TanStackRouterVite(),
     tailwindcss(),
     viteReact(),
     VitePWA({

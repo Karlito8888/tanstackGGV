@@ -1,35 +1,24 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { RouterProvider } from '@tanstack/react-router'
-import { getRouter, useAuth } from './router'
-import * as TanstackQuery from './integrations/tanstack-query/root-provider'
-import './styles.css'
 
-const rqContext = TanstackQuery.getContext()
-const router = getRouter()
+import { getRouter } from './router'
+import { AuthProvider, useAuth } from './contexts/AuthContext'
 
-function InnerApp() {
-  const { data, isLoading } = useAuth()
+// Inner component that uses the auth context
+function AppContent() {
+  const { user } = useAuth()
+  const router = React.useMemo(() => getRouter(user), [user])
+  
+  return <RouterProvider router={router} />
+}
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div>Loading...</div>
-      </div>
-    )
-  }
-
+// Main App component wrapped with AuthProvider
+function App() {
   return (
-    <RouterProvider
-      router={router}
-      context={{
-        auth: {
-          user: data?.user ?? null,
-          session: data?.session ?? null,
-          isLoading: false,
-        },
-      }}
-    />
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   )
 }
 
@@ -37,8 +26,6 @@ const rootElement = document.getElementById('root')!
 
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <TanstackQuery.Provider {...rqContext}>
-      <InnerApp />
-    </TanstackQuery.Provider>
+    <App />
   </React.StrictMode>,
 )

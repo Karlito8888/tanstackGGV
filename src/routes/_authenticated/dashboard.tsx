@@ -1,11 +1,13 @@
 import { createFileRoute } from '@tanstack/react-router'
 import {
+  ArrowRightOnRectangleIcon,
   ChatBubbleLeftRightIcon,
   MapPinIcon,
   ShoppingBagIcon,
   UserCircleIcon,
   UsersIcon,
 } from '@heroicons/react/24/outline'
+import { useAuth } from '@/contexts/AuthContext'
 
 export const Route = createFileRoute('/_authenticated/dashboard')({
   component: Dashboard,
@@ -13,6 +15,11 @@ export const Route = createFileRoute('/_authenticated/dashboard')({
 
 function Dashboard() {
   const { auth } = Route.useRouteContext()
+  const { signOut } = useAuth()
+
+  const handleSignOut = async () => {
+    await signOut()
+  }
 
   const quickActions = [
     {
@@ -60,8 +67,14 @@ function Dashboard() {
         <p className="text-blue-100 mb-4">
           Ready to connect with your community?
         </p>
-        <div className="bg-white/20 backdrop-blur-sm rounded-lg p-3">
-          <p className="text-sm text-blue-50">{auth.user?.email}</p>
+        <div className="bg-white/20 backdrop-blur-sm rounded-lg p-3 flex justify-between items-center">
+          <p className="text-sm text-blue-50">{auth?.email}</p>
+          <button
+            onClick={handleSignOut}
+            className="text-white hover:text-blue-200 transition-colors"
+          >
+            <ArrowRightOnRectangleIcon className="h-5 w-5" />
+          </button>
         </div>
       </div>
 

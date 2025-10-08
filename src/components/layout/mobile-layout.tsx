@@ -1,5 +1,5 @@
 import { Outlet, useNavigate } from '@tanstack/react-router'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+
 import {
   ChatBubbleLeftRightIcon,
   HomeIcon,
@@ -8,8 +8,8 @@ import {
   UserIcon,
   UsersIcon,
 } from '@heroicons/react/24/outline'
-import { Button } from '../ui/button'
-import { signOut } from '../../lib/auth'
+
+import { DarkModeToggle } from '../ui/dark-mode-toggle'
 
 interface MobileLayoutProps {
   children?: React.ReactNode
@@ -17,15 +17,6 @@ interface MobileLayoutProps {
 
 export function MobileLayout({ children }: MobileLayoutProps) {
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
-
-  const logoutMutation = useMutation({
-    mutationFn: signOut,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['session'] })
-      navigate({ to: '/', search: { redirect: '/dashboard' } })
-    },
-  })
 
   const navigation = [
     { name: 'Home', icon: HomeIcon, to: '/dashboard' },
@@ -37,31 +28,32 @@ export function MobileLayout({ children }: MobileLayoutProps) {
   ]
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200">
+      <header className="bg-background shadow-sm border-b border-border">
         <div className="px-4 py-3">
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-semibold text-gray-900">GGV Connect</h1>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => logoutMutation.mutate()}
-              disabled={logoutMutation.isPending}
-            >
-              {logoutMutation.isPending ? '...' : 'Logout'}
-            </Button>
+            <h1 className="text-xl font-semibold text-foreground">
+              GGV Connect
+            </h1>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto pb-16">
+      <main className="flex-1 overflow-y-auto pb-16 relative">
+        {/* Dark Mode Toggle - Absolute positioned */}
+        <div className="absolute top-4 right-4 z-10">
+          <div className="bg-background/80 backdrop-blur-sm border border-border rounded-md p-1 shadow-sm">
+            <DarkModeToggle />
+          </div>
+        </div>
+
         {children || <Outlet />}
       </main>
 
       {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200">
+      <nav className="fixed bottom-0 left-0 right-0 bg-background border-t border-border">
         <div className="grid grid-cols-6 gap-1 px-1 py-2">
           {navigation.map((item) => {
             const Icon = item.icon
@@ -69,7 +61,7 @@ export function MobileLayout({ children }: MobileLayoutProps) {
               <button
                 key={item.name}
                 onClick={() => navigate({ to: item.to })}
-                className="flex flex-col items-center justify-center py-2 px-1 text-xs text-gray-600 hover:text-blue-600 focus:outline-none focus:text-blue-600 transition-colors"
+                className="flex flex-col items-center justify-center py-2 px-1 text-xs text-muted-foreground hover:text-primary focus:outline-none focus:text-primary transition-colors"
               >
                 <Icon className="h-5 w-5 mb-1" />
                 <span className="truncate">{item.name}</span>

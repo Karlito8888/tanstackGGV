@@ -1,87 +1,82 @@
 // Marketplace Listings CRUD hooks with mobile-first optimizations
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '../lib/supabase'
 import { queryKeys } from '../lib/query-keys'
-import { createCRUDHooks } from '../lib/crud/create-crud-hooks'
 import { handleMutationError } from '../lib/crud/error-handling'
+import { MarketplaceService } from '../services/marketplace.service'
 import type { Row } from '../lib/database-types'
 
 type MarketplaceListing = Row<'marketplace_listings'>
 
-// Create base CRUD hooks for marketplace listings
-const marketplaceHooks = createCRUDHooks<'marketplace_listings'>({
-  tableName: 'marketplace_listings',
-  queryKeys: {
-    all: queryKeys.marketplaceListings.all,
-    lists: queryKeys.marketplaceListings.lists,
-    list: queryKeys.marketplaceListings.list,
-    details: queryKeys.marketplaceListings.details,
-    detail: queryKeys.marketplaceListings.detail,
-  },
-})
+const marketplaceService = new MarketplaceService()
 
-// Export the basic CRUD hooks from the factory
-export const useMarketplaceListingList = marketplaceHooks.useList
-export const useMarketplaceListingById = marketplaceHooks.useById
-export const useMarketplaceListingCreate = marketplaceHooks.useCreate
-export const useMarketplaceListingUpdate = marketplaceHooks.useUpdate
-export const useMarketplaceListingDelete = marketplaceHooks.useDelete
+// Create base CRUD hooks for marketplace listings using MarketplaceService
+export const useMarketplaceListingList = (filters?: any) => {
+  return useQuery({
+    queryKey: queryKeys.marketplaceListings.list(filters),
+    queryFn: () => marketplaceService.getListings(filters),
+  })
+}
+
+export const useMarketplaceListingById = (id?: string) => {
+  return useQuery({
+    queryKey: queryKeys.marketplaceListings.detail(id || ''),
+    queryFn: () => marketplaceService.getListing(id!),
+    enabled: !!id,
+  })
+}
+
+export const useMarketplaceListingCreate = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (data: any) => marketplaceService.createListing(data),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.marketplaceListings.lists(),
+      })
+      queryClient.setQueryData(
+        queryKeys.marketplaceListings.detail(data.id),
+        data,
+      )
+    },
+    onError: (error) => handleMutationError(error, 'create'),
+  })
+}
+
+export const useMarketplaceListingUpdate = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, ...updates }: any) =>
+      marketplaceService.updateListing(id, updates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.marketplaceListings.lists(),
+      })
+    },
+    onError: (error) => handleMutationError(error, 'update'),
+  })
+}
+
+export const useMarketplaceListingDelete = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => marketplaceService.deleteListing(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.marketplaceListings.lists(),
+      })
+    },
+    onError: (error) => handleMutationError(error, 'delete'),
+  })
+}
 
 // Marketplace queries with mobile-first optimizations
 export function useMarketplaceListing(id?: string) {
   return useQuery({
     queryKey: queryKeys.marketplaceListings.detail(id || ''),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('marketplace_listings')
-        .select(
-          `
-          *,
-          profiles (
-            id,
-            username,
-            full_name,
-            avatar_url,
-            phone_number,
-            viber_number,
-            whatsapp_number,
-            messenger_url,
-            profile_location_associations (
-              locations (
-                id,
-                block,
-                lot,
-                coordinates
-              )
-            )
-          )
-        `,
-        )
-        .eq('id', id || '')
-        .single()
-
-      if (error) throw error
-      return data as MarketplaceListing & {
-        profiles: {
-          id: string
-          username: string | null
-          full_name: string | null
-          avatar_url: string | null
-          phone_number: string | null
-          viber_number: string | null
-          whatsapp_number: string | null
-          messenger_url: string | null
-          profile_location_associations: Array<{
-            locations: {
-              id: string
-              block: string | null
-              lot: string | null
-              coordinates: any
-            } | null
-          }>
-        }
-      }
-    },
+    queryFn: () => marketplaceService.getListing(id!),
     enabled: !!id,
     staleTime: 5 * 60 * 1000, // 5 minutes for listing details
   })
@@ -102,89 +97,7 @@ export function useMarketplaceListingsList(filters?: {
 }) {
   return useQuery({
     queryKey: queryKeys.marketplaceListings.list(filters),
-    queryFn: async () => {
-      let query = supabase.from('marketplace_listings').select(
-        `
-          *,
-          profiles (
-            id,
-            username,
-            full_name,
-            avatar_url,
-            profile_location_associations (
-              locations (
-                id,
-                block,
-                lot
-              )
-            )
-          )
-        `,
-        { count: 'exact' },
-      )
-
-      // RLS Compliance: Always ensure we can see the data
-      // If no specific profile filter, ensure we only request active listings
-      // RLS will automatically filter: (is_active = true) OR (auth.uid() = profile_id)
-      if (!filters?.profileId) {
-        // For public listings, we rely on RLS to show only active listings
-        // and user's own listings regardless of status
-      }
-
-      // Apply filters
-      if (filters?.profileId) {
-        query = query.eq('profile_id', filters.profileId)
-      }
-      if (filters?.category) {
-        query = query.eq('category', filters.category)
-      }
-      if (filters?.listingType) {
-        query = query.eq('listing_type', filters.listingType)
-      }
-      // Note: status filter will only work for user's own listings due to RLS
-      // For public listings, RLS restricts to is_active = true only
-      if (filters?.status) {
-        query = query.eq('status', filters.status)
-      }
-      if (filters?.featured !== undefined) {
-        query = query.eq('is_featured', filters.featured)
-      }
-      if (filters?.active !== undefined) {
-        query = query.eq('is_active', filters.active)
-      }
-      if (filters?.priceMin !== undefined) {
-        query = query.gte('price', filters.priceMin)
-      }
-      if (filters?.priceMax !== undefined) {
-        query = query.lte('price', filters.priceMax)
-      }
-      if (filters?.search) {
-        query = query.or(
-          `title.ilike.%${filters.search}%,description.ilike.%${filters.search}%,category.ilike.%${filters.search}%`,
-        )
-      }
-
-      // Order by created_at desc, featured first
-      query = query
-        .order('is_featured', { ascending: false })
-        .order('created_at', { ascending: false })
-
-      // Apply pagination
-      if (filters?.limit) {
-        query = query.limit(filters.limit)
-      }
-      if (filters?.offset) {
-        query = query.range(
-          filters.offset,
-          filters.offset + (filters.limit || 10) - 1,
-        )
-      }
-
-      const { data, error, count } = await query
-      if (error) throw error
-
-      return { data, count }
-    },
+    queryFn: () => marketplaceService.getListings(filters),
     staleTime: 2 * 60 * 1000, // 2 minutes for listings list
   })
 }
@@ -192,30 +105,7 @@ export function useMarketplaceListingsList(filters?: {
 export function useMarketplaceListingsByProfile(profileId?: string) {
   return useQuery({
     queryKey: queryKeys.marketplaceListings.byProfile(profileId || ''),
-    queryFn: async () => {
-      if (!profileId) return []
-
-      // RLS Compliance: Users can only see their own listings
-      // If requesting someone else's listings, only show active ones
-      const { data: currentUser } = await supabase.auth.getUser()
-      const isCurrentUser = currentUser.user?.id === profileId
-
-      let query = supabase
-        .from('marketplace_listings')
-        .select('*')
-        .eq('profile_id', profileId)
-
-      // If not current user, only show active listings (RLS will enforce this)
-      if (!isCurrentUser) {
-        query = query.eq('is_active', true)
-      }
-
-      query = query.order('created_at', { ascending: false })
-
-      const { data, error } = await query
-      if (error) throw error
-      return data as Array<MarketplaceListing>
-    },
+    queryFn: () => marketplaceService.getListingsByProfile(profileId!),
     enabled: !!profileId,
     staleTime: 5 * 60 * 1000, // 5 minutes for profile listings
   })
@@ -224,59 +114,7 @@ export function useMarketplaceListingsByProfile(profileId?: string) {
 export function useFeaturedMarketplaceListings() {
   return useQuery({
     queryKey: queryKeys.marketplaceListings.featured(),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('marketplace_listings')
-        .select(
-          `
-          *,
-          profiles (
-            id,
-            username,
-            full_name,
-            avatar_url,
-            profile_location_associations (
-              locations (
-                id,
-                block,
-                lot
-              )
-            )
-          )
-        `,
-        )
-        .eq('is_featured', true)
-        .eq('is_active', true)
-        // RLS Compliance: Remove status filter since RLS only allows is_active = true for public viewing
-        // The available status will be filtered client-side if needed, or RLS policy should be updated
-        .order('created_at', { ascending: false })
-        .limit(10)
-
-      if (error) throw error
-
-      // Filter client-side for available status since RLS doesn't support status filtering for public
-      const filteredData = data.filter(
-        (listing) => listing.status === 'available',
-      )
-
-      return filteredData as Array<
-        MarketplaceListing & {
-          profiles: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-            profile_location_associations: Array<{
-              locations: {
-                id: string
-                block: string | null
-                lot: string | null
-              } | null
-            }>
-          }
-        }
-      >
-    },
+    queryFn: () => marketplaceService.getFeaturedListings(),
     staleTime: 10 * 60 * 1000, // 10 minutes for featured listings
   })
 }
@@ -284,58 +122,7 @@ export function useFeaturedMarketplaceListings() {
 export function useActiveMarketplaceListings() {
   return useQuery({
     queryKey: queryKeys.marketplaceListings.active(),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('marketplace_listings')
-        .select(
-          `
-          *,
-          profiles (
-            id,
-            username,
-            full_name,
-            avatar_url,
-            profile_location_associations (
-              locations (
-                id,
-                block,
-                lot
-              )
-            )
-          )
-        `,
-        )
-        .eq('is_active', true)
-        // RLS Compliance: Remove status filter since RLS only allows is_active = true for public viewing
-        // The available status will be filtered client-side if needed
-        .order('created_at', { ascending: false })
-        .limit(20)
-
-      if (error) throw error
-
-      // Filter client-side for available status since RLS doesn't support status filtering for public
-      const filteredData = data.filter(
-        (listing) => listing.status === 'available',
-      )
-
-      return filteredData as Array<
-        MarketplaceListing & {
-          profiles: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-            profile_location_associations: Array<{
-              locations: {
-                id: string
-                block: string | null
-                lot: string | null
-              } | null
-            }>
-          }
-        }
-      >
-    },
+    queryFn: () => marketplaceService.getActiveListings(),
     staleTime: 3 * 60 * 1000, // 3 minutes for active listings
   })
 }
@@ -345,18 +132,9 @@ export function useCreateMarketplaceListing() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (
+    mutationFn: (
       newData: Omit<MarketplaceListing, 'id' | 'created_at' | 'updated_at'>,
-    ) => {
-      const { data, error } = await supabase
-        .from('marketplace_listings')
-        .insert(newData)
-        .select()
-        .single()
-
-      if (error) throw error
-      return data as MarketplaceListing
-    },
+    ) => marketplaceService.createListing(newData),
     onMutate: async (newData) => {
       // Cancel outgoing refetches
       await queryClient.cancelQueries({
@@ -426,26 +204,13 @@ export function useUpdateMarketplaceListingStatus() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({
+    mutationFn: ({
       id,
       status,
     }: {
       id: string
       status: 'available' | 'pending' | 'sold' | 'expired'
-    }) => {
-      const { data, error } = await supabase
-        .from('marketplace_listings')
-        .update({
-          status,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id)
-        .select()
-        .single()
-
-      if (error) throw error
-      return data as MarketplaceListing
-    },
+    }) => marketplaceService.updateListingStatus(id, status),
     onMutate: async ({ id, status }) => {
       // Cancel outgoing refetches
       await queryClient.cancelQueries({
@@ -506,26 +271,8 @@ export function useToggleMarketplaceListingFeatured() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({
-      id,
-      is_featured,
-    }: {
-      id: string
-      is_featured: boolean
-    }) => {
-      const { data, error } = await supabase
-        .from('marketplace_listings')
-        .update({
-          is_featured,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id)
-        .select()
-        .single()
-
-      if (error) throw error
-      return data as MarketplaceListing
-    },
+    mutationFn: ({ id, is_featured }: { id: string; is_featured: boolean }) =>
+      marketplaceService.toggleFeatured(id, is_featured),
     onMutate: async ({ id, is_featured }) => {
       // Cancel outgoing refetches
       await queryClient.cancelQueries({

@@ -1,25 +1,23 @@
 import { Outlet, createFileRoute, redirect } from '@tanstack/react-router'
-import { MobileLayout } from '../components/layout/mobile-layout'
 
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: ({ context, location }) => {
-    // Check if user is authenticated
-    if (!context.auth.user) {
+    if (!context.auth) {
       throw redirect({
-        to: '/',
+        to: '/login',
         search: {
           redirect: location.href,
         },
       })
     }
   },
-  component: AuthenticatedLayout,
+  component: RouteComponent,
 })
 
-function AuthenticatedLayout() {
+function RouteComponent() {
   return (
-    <MobileLayout>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Outlet />
-    </MobileLayout>
+    </div>
   )
 }

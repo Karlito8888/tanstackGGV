@@ -13,30 +13,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { queryKeys } from '../lib/query-keys'
-import { createCRUDHooks } from '../lib/crud/create-crud-hooks'
+
 import { handleMutationError } from '../lib/crud/error-handling'
+import { messageHeaderService } from '../services/message-header.service'
 import type { Row } from '../lib/database-types'
 
 type MessagesHeader = Row<'messages_header'>
 
-// Create base CRUD hooks for messages_header
-const messagesHeaderHooks = createCRUDHooks<'messages_header'>({
-  tableName: 'messages_header',
-  queryKeys: {
-    all: queryKeys.messagesHeader.all,
-    lists: queryKeys.messagesHeader.lists,
-    list: queryKeys.messagesHeader.list,
-    details: queryKeys.messagesHeader.details,
-    detail: queryKeys.messagesHeader.detail,
-  },
-})
-
-// Export the basic CRUD hooks from the factory
-export const useMessagesHeaderList = messagesHeaderHooks.useList
-export const useMessagesHeaderById = messagesHeaderHooks.useById
-export const useMessagesHeaderCreate = messagesHeaderHooks.useCreate
-export const useMessagesHeaderUpdate = messagesHeaderHooks.useUpdate
-export const useMessagesHeaderDelete = messagesHeaderHooks.useDelete
+// Messages header hooks refactored to use service layer
 
 // Messages Header queries with mobile-first optimizations
 export function useMessagesHeaderByUser(
@@ -50,49 +34,7 @@ export function useMessagesHeaderByUser(
   return useQuery({
     queryKey: queryKeys.messagesHeader.byUser(userId),
     queryFn: async () => {
-      let query = supabase
-        .from('messages_header')
-        .select(
-          `
-          *,
-          profiles:user_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-
-      // Filter out expired messages unless explicitly requested
-      if (!options?.includeExpired) {
-        query = query.or('expires_at.is.null,expires_at.gt.now()')
-      }
-
-      if (options?.limit) {
-        query = query.limit(options.limit)
-      }
-      if (options?.offset) {
-        query = query.range(
-          options.offset,
-          options.offset + (options.limit || 50) - 1,
-        )
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-      return data as Array<
-        MessagesHeader & {
-          profiles: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-        }
-      >
+      return messageHeaderService.getActiveMessagesByUser(userId, options)
     },
     enabled: !!userId,
     staleTime: 2 * 60 * 1000, // 2 minutes for user messages
@@ -115,45 +57,7 @@ export function useActiveMessagesHeader(options?: {
         throw new Error('User not authenticated')
       }
 
-      let query = supabase
-        .from('messages_header')
-        .select(
-          `
-          *,
-          profiles:user_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .eq('user_id', user.id)
-        .or('expires_at.is.null,expires_at.gt.now()')
-        .order('created_at', { ascending: false })
-
-      if (options?.limit) {
-        query = query.limit(options.limit)
-      }
-      if (options?.offset) {
-        query = query.range(
-          options.offset,
-          options.offset + (options.limit || 50) - 1,
-        )
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-      return data as Array<
-        MessagesHeader & {
-          profiles: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-        }
-      >
+      return messageHeaderService.getActiveMessagesByUser(user.id, options)
     },
     staleTime: 5 * 60 * 1000, // 5 minutes for active messages
   })
@@ -175,46 +79,7 @@ export function useExpiredMessagesHeader(options?: {
         throw new Error('User not authenticated')
       }
 
-      let query = supabase
-        .from('messages_header')
-        .select(
-          `
-          *,
-          profiles:user_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .eq('user_id', user.id)
-        .not('expires_at', 'is', null)
-        .lt('expires_at', new Date().toISOString())
-        .order('expires_at', { ascending: true })
-
-      if (options?.limit) {
-        query = query.limit(options.limit)
-      }
-      if (options?.offset) {
-        query = query.range(
-          options.offset,
-          options.offset + (options.limit || 50) - 1,
-        )
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-      return data as Array<
-        MessagesHeader & {
-          profiles: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-        }
-      >
+      return messageHeaderService.getExpiredMessagesByUser(user.id, options)
     },
     staleTime: 10 * 60 * 1000, // 10 minutes for expired messages
   })
@@ -240,44 +105,11 @@ export function useMessagesHeaderSearch(
         throw new Error('User not authenticated')
       }
 
-      let query = supabase
-        .from('messages_header')
-        .select(
-          `
-          *,
-          profiles:user_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .eq('user_id', options?.userId || user.id)
-        .ilike('message', `%${searchQuery}%`)
-        .order('created_at', { ascending: false })
-
-      // Filter out expired messages unless explicitly requested
-      if (!options?.includeExpired) {
-        query = query.or('expires_at.is.null,expires_at.gt.now()')
-      }
-
-      if (options?.limit) {
-        query = query.limit(options.limit)
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-      return data as Array<
-        MessagesHeader & {
-          profiles: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-        }
-      >
+      return messageHeaderService.searchMessagesByUser(
+        searchQuery,
+        options?.userId || user.id,
+        options,
+      )
     },
     enabled: !!searchQuery && searchQuery.length >= 2,
     staleTime: 5 * 60 * 1000, // 5 minutes for search results
@@ -303,53 +135,7 @@ export function useCreateMessageHeader() {
         throw new Error('User not authenticated')
       }
 
-      const coinsToSpend = newMessageData.coins_spent || 0
-
-      // Use the secure publish_header_message function for atomic coin deduction
-      const { error } = await supabase.rpc('publish_header_message', {
-        p_user_id: user.id,
-        p_message: newMessageData.message,
-        p_expires_at: newMessageData.expires_at || null,
-        p_coins: coinsToSpend,
-      })
-
-      if (error) {
-        // Handle specific coin-related errors
-        if (error.message.includes('Not enough coins')) {
-          throw new Error('Insufficient coins to publish this message')
-        }
-        throw error
-      }
-
-      // Fetch the created message with profile data
-      const { data: messageData, error: fetchError } = await supabase
-        .from('messages_header')
-        .select(
-          `
-          *,
-          profiles:user_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .eq('user_id', user.id)
-        .eq('message', newMessageData.message)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
-
-      if (fetchError) throw fetchError
-      return messageData as MessagesHeader & {
-        profiles: {
-          id: string
-          username: string | null
-          full_name: string | null
-          avatar_url: string | null
-        } | null
-      }
+      return messageHeaderService.publishMessageHeader(user.id, newMessageData)
     },
     onMutate: async (newMessage) => {
       // Cancel outgoing refetches
@@ -444,53 +230,7 @@ export function useExtendMessageExpiry() {
       id: string
       additionalHours?: number
     }) => {
-      // First get current message to check existing expiry
-      const { data: currentMessage, error: fetchError } = await supabase
-        .from('messages_header')
-        .select('expires_at')
-        .eq('id', id)
-        .single()
-
-      if (fetchError) throw fetchError
-
-      // Calculate new expiry date
-      const currentExpiry = currentMessage.expires_at
-        ? new Date(currentMessage.expires_at)
-        : new Date()
-      const newExpiry = new Date(
-        currentExpiry.getTime() + (additionalHours || 24) * 60 * 60 * 1000,
-      )
-
-      const { data, error } = await supabase
-        .from('messages_header')
-        .update({
-          expires_at: newExpiry.toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id)
-        // RLS will automatically ensure user can only update their own messages
-        .select(
-          `
-          *,
-          profiles:user_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .single()
-
-      if (error) throw error
-      return data as MessagesHeader & {
-        profiles: {
-          id: string
-          username: string | null
-          full_name: string | null
-          avatar_url: string | null
-        } | null
-      }
+      return messageHeaderService.extendMessageExpiry({ id, additionalHours })
     },
     onMutate: async ({ id, additionalHours }) => {
       // Cancel outgoing refetches
@@ -567,12 +307,7 @@ export function useDeleteMessageHeader() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('messages_header')
-        .delete()
-        .eq('id', id)
-      // RLS will automatically ensure user can only delete their own messages
-      if (error) throw error
+      await messageHeaderService.deleteMessageHeader(id)
       return id
     },
     onMutate: async (id) => {
@@ -630,27 +365,8 @@ export function useCleanupExpiredMessages() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (options?: { force?: boolean; source?: string }) => {
-      // Get current user for authentication
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser()
-      if (authError || !user?.id) {
-        throw new Error('User not authenticated')
-      }
-
-      // Call the coordinated cleanup function that respects trigger activity
-      const { data, error } = await supabase.rpc(
-        'cleanup_expired_messages_with_coordination',
-        {
-          force_cleanup: options?.force || false,
-          source_type: options?.source || 'manual',
-        },
-      )
-
-      if (error) throw error
-      return { userId: user.id, cleanupResult: data[0] }
+    mutationFn: async () => {
+      return messageHeaderService.cleanupExpiredMessages()
     },
     onSuccess: () => {
       // Force complete cache refresh
@@ -670,20 +386,7 @@ export function useCoordinatedCleanup() {
 
   return useMutation({
     mutationFn: async () => {
-      // Get current user for authentication
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser()
-      if (authError || !user?.id) {
-        throw new Error('User not authenticated')
-      }
-
-      // Call the coordinated cleanup function
-      const { data, error } = await supabase.rpc('coordinated_cleanup')
-
-      if (error) throw error
-      return { userId: user.id, result: data }
+      return messageHeaderService.coordinatedCleanup()
     },
     onSuccess: () => {
       // Force complete cache refresh
@@ -702,10 +405,7 @@ export function useCleanupStatistics() {
   return useQuery({
     queryKey: ['cleanup-statistics'],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_cleanup_statistics')
-
-      if (error) throw error
-      return data
+      return messageHeaderService.getCleanupStatistics()
     },
     staleTime: 30 * 1000, // 30 seconds for cleanup stats
   })
@@ -715,32 +415,7 @@ export function useCleanupStatistics() {
 export function useValidateUserCoins() {
   return useMutation({
     mutationFn: async (requiredCoins: number) => {
-      // Get current user
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser()
-      if (authError || !user?.id) {
-        throw new Error('User not authenticated')
-      }
-
-      // Get user profile to check coin balance
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('coins')
-        .eq('id', user.id)
-        .single()
-
-      if (profileError) throw profileError
-
-      const hasEnoughCoins = profile.coins >= requiredCoins
-
-      return {
-        hasEnoughCoins,
-        currentCoins: profile.coins,
-        requiredCoins,
-        userId: user.id,
-      }
+      return messageHeaderService.validateUserCoins(requiredCoins)
     },
   })
 }
@@ -750,22 +425,7 @@ export function useUserCoins() {
   return useQuery({
     queryKey: ['user-coins'],
     queryFn: async () => {
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser()
-      if (authError || !user?.id) {
-        throw new Error('User not authenticated')
-      }
-
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('coins')
-        .eq('id', user.id)
-        .single()
-
-      if (profileError) throw profileError
-      return profile.coins || 0
+      return messageHeaderService.getUserCoins()
     },
     staleTime: 30 * 1000, // 30 seconds - coins change frequently
   })

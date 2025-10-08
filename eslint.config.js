@@ -4,7 +4,14 @@ import { tanstackConfig } from '@tanstack/eslint-config'
 
 export default [
   {
-    ignores: ['eslint.config.js'],
+    ignores: [
+      'eslint.config.js',
+      'types/database.ts',
+      'dist/',
+      'build/',
+      '*.d.ts',
+      '*.generated.ts',
+    ],
   },
   ...tanstackConfig,
   {

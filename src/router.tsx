@@ -1,22 +1,16 @@
 import { createRouter } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
 import * as TanstackQuery from './integrations/tanstack-query/root-provider'
-import { getCurrentSession } from './lib/auth'
 import { routeTree } from './routeTree.gen'
+import type { User } from '@supabase/supabase-js'
 
-export const getRouter = () => {
+export const getRouter = (auth: User | null = null) => {
   const rqContext = TanstackQuery.getContext()
 
   const router = createRouter({
     routeTree,
     context: {
       ...rqContext,
-      // Auth will be passed from the component
-      auth: {
-        user: null,
-        session: null,
-        isLoading: true,
-      },
+      auth,
     },
     defaultPreload: 'intent',
     Wrap: (props: { children: React.ReactNode }) => {
@@ -29,17 +23,6 @@ export const getRouter = () => {
   })
 
   return router
-}
-
-// Hook to use in main.tsx
-export function useAuth() {
-  return useQuery({
-    queryKey: ['session'],
-    queryFn: getCurrentSession,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    refetchOnWindowFocus: true,
-    refetchInterval: 60 * 1000, // Refetch every minute
-  })
 }
 
 declare module '@tanstack/react-router' {

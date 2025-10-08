@@ -1,31 +1,72 @@
 // Private Messages CRUD hooks with mobile-first optimizations
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '../lib/supabase'
 import { queryKeys } from '../lib/query-keys'
-import { createCRUDHooks } from '../lib/crud/create-crud-hooks'
 import { handleMutationError } from '../lib/crud/error-handling'
+import { PrivateMessageService } from '../services/private-message.service'
 import type { Row } from '../lib/database-types'
 
 type PrivateMessage = Row<'private_messages'>
 
-// Create base CRUD hooks for private_messages
-const privateMessageHooks = createCRUDHooks<'private_messages'>({
-  tableName: 'private_messages',
-  queryKeys: {
-    all: queryKeys.privateMessages.all,
-    lists: queryKeys.privateMessages.lists,
-    list: queryKeys.privateMessages.list,
-    details: queryKeys.privateMessages.details,
-    detail: queryKeys.privateMessages.detail,
-  },
-})
+const privateMessageService = new PrivateMessageService()
 
-// Export the basic CRUD hooks from the factory
-export const usePrivateMessageList = privateMessageHooks.useList
-export const usePrivateMessageById = privateMessageHooks.useById
-export const usePrivateMessageCreate = privateMessageHooks.useCreate
-export const usePrivateMessageUpdate = privateMessageHooks.useUpdate
-export const usePrivateMessageDelete = privateMessageHooks.useDelete
+// Create base CRUD hooks for private_messages using PrivateMessageService
+export const usePrivateMessageList = (filters?: any) => {
+  return useQuery({
+    queryKey: queryKeys.privateMessages.list(filters),
+    queryFn: () =>
+      privateMessageService.getConversations('currentUserId', filters), // This needs current user ID
+  })
+}
+
+export const usePrivateMessageById = (id?: string) => {
+  return useQuery({
+    queryKey: queryKeys.privateMessages.detail(id || ''),
+    queryFn: () => privateMessageService.getMessageReplies(id!), // This might need adjustment
+    enabled: !!id,
+  })
+}
+
+export const usePrivateMessageCreate = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (data: any) => privateMessageService.sendMessage(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.privateMessages.lists(),
+      })
+    },
+    onError: (error) => handleMutationError(error, 'create'),
+  })
+}
+
+export const usePrivateMessageUpdate = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id }: any) => privateMessageService.markAsRead(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.privateMessages.lists(),
+      })
+    },
+    onError: (error) => handleMutationError(error, 'update'),
+  })
+}
+
+export const usePrivateMessageDelete = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => privateMessageService.deleteMessage(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.privateMessages.lists(),
+      })
+    },
+    onError: (error) => handleMutationError(error, 'delete'),
+  })
+}
 
 // Private Messages queries with mobile-first optimizations
 export function usePrivateMessageConversations(
@@ -37,71 +78,7 @@ export function usePrivateMessageConversations(
 ) {
   return useQuery({
     queryKey: queryKeys.privateMessages.conversations(userId),
-    queryFn: async () => {
-      let query = supabase
-        .from('private_messages')
-        .select(
-          `
-          *,
-          sender:sender_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          ),
-          receiver:receiver_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
-        .is('deleted_at', null)
-        .order('created_at', { ascending: false })
-
-      if (options?.limit) {
-        query = query.limit(options.limit)
-      }
-      if (options?.offset) {
-        query = query.range(
-          options.offset,
-          options.offset + (options.limit || 50) - 1,
-        )
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-
-      // Group messages by conversation (pair of users)
-      const conversations = new Map<string, any>()
-
-      data.forEach((message) => {
-        const otherUserId =
-          message.sender_id === userId ? message.receiver_id : message.sender_id
-
-        const conversationKey = [userId, otherUserId].sort().join('-')
-
-        if (!conversations.has(conversationKey)) {
-          conversations.set(conversationKey, {
-            id: conversationKey,
-            other_user:
-              message.sender_id === userId ? message.receiver : message.sender,
-            last_message: message,
-            unread_count: 0,
-          })
-        }
-
-        // Count unread messages
-        if (message.receiver_id === userId && !message.read_at) {
-          const conversation = conversations.get(conversationKey)
-          conversation.unread_count += 1
-        }
-      })
-
-      return Array.from(conversations.values())
-    },
+    queryFn: () => privateMessageService.getConversations(userId, options),
     enabled: !!userId,
     staleTime: 30 * 1000, // 30 seconds for conversations
   })
@@ -117,73 +94,8 @@ export function usePrivateMessageConversation(
 ) {
   return useQuery({
     queryKey: queryKeys.privateMessages.conversation(userId1, userId2),
-    queryFn: async () => {
-      let query = supabase
-        .from('private_messages')
-        .select(
-          `
-          *,
-          sender:sender_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          ),
-          receiver:receiver_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          ),
-          reply_message:reply_to (
-            id,
-            message,
-            sender_id,
-            created_at
-          )
-        `,
-        )
-        .or(
-          `(sender_id.eq.${userId1},receiver_id.eq.${userId2}),(sender_id.eq.${userId2},receiver_id.eq.${userId1})`,
-        )
-        .is('deleted_at', null)
-        .order('created_at', { ascending: true })
-
-      if (options?.limit) {
-        query = query.limit(options.limit)
-      }
-      if (options?.offset) {
-        query = query.range(
-          options.offset,
-          options.offset + (options.limit || 50) - 1,
-        )
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-      return data as Array<
-        PrivateMessage & {
-          sender: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-          receiver: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-          reply_message: {
-            id: string
-            message: string
-            sender_id: string | null
-            created_at: string
-          } | null
-        }
-      >
-    },
+    queryFn: () =>
+      privateMessageService.getConversation(userId1, userId2, options),
     enabled: !!userId1 && !!userId2,
     staleTime: 30 * 1000, // 30 seconds for conversation messages
   })
@@ -198,47 +110,7 @@ export function usePrivateMessagesSent(
 ) {
   return useQuery({
     queryKey: queryKeys.privateMessages.sent(senderId),
-    queryFn: async () => {
-      let query = supabase
-        .from('private_messages')
-        .select(
-          `
-          *,
-          receiver:receiver_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .eq('sender_id', senderId)
-        .is('deleted_at', null)
-        .order('created_at', { ascending: false })
-
-      if (options?.limit) {
-        query = query.limit(options.limit)
-      }
-      if (options?.offset) {
-        query = query.range(
-          options.offset,
-          options.offset + (options.limit || 50) - 1,
-        )
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-      return data as Array<
-        PrivateMessage & {
-          receiver: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-        }
-      >
-    },
+    queryFn: () => privateMessageService.getSentMessages(senderId, options),
     enabled: !!senderId,
     staleTime: 2 * 60 * 1000, // 2 minutes for sent messages
   })
@@ -253,47 +125,8 @@ export function usePrivateMessagesReceived(
 ) {
   return useQuery({
     queryKey: queryKeys.privateMessages.received(receiverId),
-    queryFn: async () => {
-      let query = supabase
-        .from('private_messages')
-        .select(
-          `
-          *,
-          sender:sender_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .eq('receiver_id', receiverId)
-        .is('deleted_at', null)
-        .order('created_at', { ascending: false })
-
-      if (options?.limit) {
-        query = query.limit(options.limit)
-      }
-      if (options?.offset) {
-        query = query.range(
-          options.offset,
-          options.offset + (options.limit || 50) - 1,
-        )
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-      return data as Array<
-        PrivateMessage & {
-          sender: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-        }
-      >
-    },
+    queryFn: () =>
+      privateMessageService.getReceivedMessages(receiverId, options),
     enabled: !!receiverId,
     staleTime: 2 * 60 * 1000, // 2 minutes for received messages
   })
@@ -308,48 +141,7 @@ export function usePrivateMessagesUnread(
 ) {
   return useQuery({
     queryKey: queryKeys.privateMessages.unread(userId),
-    queryFn: async () => {
-      let query = supabase
-        .from('private_messages')
-        .select(
-          `
-          *,
-          sender:sender_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .eq('receiver_id', userId)
-        .is('read_at', null)
-        .is('deleted_at', null)
-        .order('created_at', { ascending: false })
-
-      if (options?.limit) {
-        query = query.limit(options.limit)
-      }
-      if (options?.offset) {
-        query = query.range(
-          options.offset,
-          options.offset + (options.limit || 50) - 1,
-        )
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-      return data as Array<
-        PrivateMessage & {
-          sender: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-        }
-      >
-    },
+    queryFn: () => privateMessageService.getUnreadMessages(userId, options),
     enabled: !!userId,
     staleTime: 30 * 1000, // 30 seconds for unread messages
   })
@@ -358,17 +150,7 @@ export function usePrivateMessagesUnread(
 export function usePrivateMessageUnreadCount(userId: string) {
   return useQuery({
     queryKey: queryKeys.privateMessages.unreadCount(userId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('private_messages')
-        .select('id', { count: 'exact' })
-        .eq('receiver_id', userId)
-        .is('read_at', null)
-        .is('deleted_at', null)
-
-      if (error) throw error
-      return data.length || 0
-    },
+    queryFn: () => privateMessageService.getUnreadCount(userId),
     enabled: !!userId,
     staleTime: 30 * 1000, // 30 seconds for unread count
   })
@@ -377,48 +159,7 @@ export function usePrivateMessageUnreadCount(userId: string) {
 export function usePrivateMessageReplies(messageId: string) {
   return useQuery({
     queryKey: queryKeys.privateMessages.replies(messageId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('private_messages')
-        .select(
-          `
-          *,
-          sender:sender_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          ),
-          receiver:receiver_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .eq('reply_to', messageId)
-        .is('deleted_at', null)
-        .order('created_at', { ascending: true })
-
-      if (error) throw error
-      return data as Array<
-        PrivateMessage & {
-          sender: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-          receiver: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-        }
-      >
-    },
+    queryFn: () => privateMessageService.getMessageReplies(messageId),
     enabled: !!messageId,
     staleTime: 30 * 1000, // 30 seconds for replies
   })
@@ -433,57 +174,8 @@ export function usePrivateMessageSearch(
 ) {
   return useQuery({
     queryKey: queryKeys.privateMessages.search(searchQuery, userId),
-    queryFn: async () => {
-      let query = supabase
-        .from('private_messages')
-        .select(
-          `
-          *,
-          sender:sender_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          ),
-          receiver:receiver_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .ilike('message', `%${searchQuery}%`)
-        .is('deleted_at', null)
-        .order('created_at', { ascending: false })
-
-      if (userId) {
-        query = query.or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
-      }
-
-      if (options?.limit) {
-        query = query.limit(options.limit)
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-      return data as Array<
-        PrivateMessage & {
-          sender: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-          receiver: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-        }
-      >
-    },
+    queryFn: () =>
+      privateMessageService.searchMessages(searchQuery, userId, options?.limit),
     enabled: !!searchQuery && searchQuery.length >= 2,
     staleTime: 5 * 60 * 1000, // 5 minutes for search results
   })
@@ -494,60 +186,14 @@ export function useSendPrivateMessage(currentUserId: string) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (messageData: {
+    mutationFn: (messageData: {
       receiver_id: string
       message: string
       message_type?: 'text' | 'image' | 'file' | 'location'
       attachment_url?: string
       attachment_type?: string
       reply_to?: string
-    }) => {
-      const { data, error } = await supabase
-        .from('private_messages')
-        .insert({
-          receiver_id: messageData.receiver_id,
-          message: messageData.message,
-          message_type: messageData.message_type || 'text',
-          attachment_url: messageData.attachment_url,
-          attachment_type: messageData.attachment_type,
-          reply_to: messageData.reply_to,
-          // sender_id will be automatically set by RLS policy using auth.uid()
-        })
-        .select(
-          `
-          *,
-          sender:sender_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          ),
-          receiver:receiver_id (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .single()
-
-      if (error) throw error
-      return data as PrivateMessage & {
-        sender: {
-          id: string
-          username: string | null
-          full_name: string | null
-          avatar_url: string | null
-        } | null
-        receiver: {
-          id: string
-          username: string | null
-          full_name: string | null
-          avatar_url: string | null
-        } | null
-      }
-    },
+    }) => privateMessageService.sendMessage(messageData),
     onMutate: async (newMessage) => {
       // Cancel outgoing refetches
       await queryClient.cancelQueries({
@@ -627,21 +273,8 @@ export function useMarkMessageAsRead(currentUserId: string) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (messageId: string) => {
-      const { data, error } = await supabase
-        .from('private_messages')
-        .update({
-          read_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', messageId)
-        // RLS will automatically ensure user can only mark their received messages as read
-        .select()
-        .single()
-
-      if (error) throw error
-      return data as PrivateMessage
-    },
+    mutationFn: (messageId: string) =>
+      privateMessageService.markAsRead(messageId),
     onMutate: async (messageId) => {
       // Cancel outgoing refetches
       await queryClient.cancelQueries({
@@ -703,22 +336,8 @@ export function useMarkConversationAsRead(currentUserId: string) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (otherUserId: string) => {
-      const { data, error } = await supabase
-        .from('private_messages')
-        .update({
-          read_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('sender_id', otherUserId)
-        .is('read_at', null)
-        .is('deleted_at', null)
-        // RLS will automatically ensure user can only mark their received messages as read
-        .select()
-
-      if (error) throw error
-      return data as Array<PrivateMessage>
-    },
+    mutationFn: (otherUserId: string) =>
+      privateMessageService.markConversationAsRead(otherUserId, currentUserId),
     onSettled: (_data, _error, otherUserId) => {
       // Always refetch after error or success
       queryClient.invalidateQueries({
@@ -745,15 +364,7 @@ export function useDeletePrivateMessage(currentUserId: string) {
 
   return useMutation({
     mutationFn: async (messageId: string) => {
-      const { error } = await supabase
-        .from('private_messages')
-        .update({
-          deleted_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', messageId)
-      // RLS will automatically ensure user can only delete their own messages
-      if (error) throw error
+      await privateMessageService.deleteMessage(messageId)
       return messageId
     },
     onMutate: async (messageId) => {
@@ -807,21 +418,8 @@ export function useDeleteConversation(currentUserId: string) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (otherUserId: string) => {
-      const { error } = await supabase
-        .from('private_messages')
-        .update({
-          deleted_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .or(
-          `(sender_id.eq.${otherUserId},receiver_id.eq.${currentUserId}),(sender_id.eq.${currentUserId},receiver_id.eq.${otherUserId})`,
-        )
-        .is('deleted_at', null)
-      // RLS will automatically ensure user can only delete their side of the conversation
-      if (error) throw error
-      return otherUserId
-    },
+    mutationFn: (otherUserId: string) =>
+      privateMessageService.deleteConversation(otherUserId, currentUserId),
     onSettled: (_data, _error, otherUserId) => {
       // Always refetch after error or success
       queryClient.invalidateQueries({

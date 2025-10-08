@@ -1,32 +1,45 @@
 // Threads CRUD hooks with mobile-first optimizations
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '../lib/supabase'
 import { queryKeys } from '../lib/query-keys'
-import { createCRUDHooks } from '../lib/crud/create-crud-hooks'
 import { handleMutationError } from '../lib/crud/error-handling'
+import { ThreadService } from '../services/thread.service'
 import type { InsertRow, Row, UpdateRow } from '../lib/database-types'
 
 type Thread = Row<'threads'>
 type ThreadInsert = InsertRow<'threads'>
 type ThreadUpdate = UpdateRow<'threads'>
 
-// Create base CRUD hooks for threads
-const threadHooks = createCRUDHooks<'threads'>({
-  tableName: 'threads',
-  queryKeys: {
-    all: queryKeys.threads.all,
-    lists: queryKeys.threads.lists,
-    list: queryKeys.threads.list,
-    details: queryKeys.threads.details,
-    detail: queryKeys.threads.detail,
-  },
-})
+const threadService = new ThreadService()
 
-// Export only the allowed CRUD hooks from the factory
-// UPDATE and DELETE are admin-only via Supabase dashboard
-export const useThreadList = threadHooks.useList
-export const useThreadById = threadHooks.useById
-export const useThreadCreate = threadHooks.useCreate
+// Create base CRUD hooks for threads using ThreadService
+export const useThreadList = (filters?: any) => {
+  return useQuery({
+    queryKey: queryKeys.threads.list(filters),
+    queryFn: () => threadService.getThreads(filters),
+  })
+}
+
+export const useThreadById = (id?: string) => {
+  return useQuery({
+    queryKey: queryKeys.threads.detail(id || ''),
+    queryFn: () => threadService.getThread(id!),
+    enabled: !!id,
+  })
+}
+
+export const useThreadCreate = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (data: ThreadInsert) => threadService.createThread(data),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.threads.lists() })
+      queryClient.setQueryData(queryKeys.threads.detail(data.id), data)
+    },
+    onError: (error) => handleMutationError(error, 'create'),
+  })
+}
+
 // Note: UPDATE and DELETE operations are admin-only via Supabase dashboard
 // export const useThreadUpdate = threadHooks.useUpdate  // Admin only
 // export const useThreadDelete = threadHooks.useDelete  // Admin only
@@ -35,43 +48,7 @@ export const useThreadCreate = threadHooks.useCreate
 export function useThread(id?: string) {
   return useQuery({
     queryKey: queryKeys.threads.detail(id || ''),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('threads')
-        .select(
-          `
-          *,
-          creator:created_by (
-            id,
-            username,
-            full_name,
-            avatar_url
-          ),
-          forum:forum_id (
-            id,
-            title,
-            icon
-          )
-        `,
-        )
-        .eq('id', id || '')
-        .single()
-
-      if (error) throw error
-      return data as Thread & {
-        creator: {
-          id: string
-          username: string | null
-          full_name: string | null
-          avatar_url: string | null
-        } | null
-        forum: {
-          id: string
-          title: string
-          icon: string | null
-        } | null
-      }
-    },
+    queryFn: () => threadService.getThread(id!),
     enabled: !!id,
     staleTime: 10 * 60 * 1000, // 10 minutes for thread data
   })
@@ -86,55 +63,7 @@ export function useThreadsList(filters?: {
 }) {
   return useQuery({
     queryKey: queryKeys.threads.list(filters),
-    queryFn: async () => {
-      let query = supabase.from('threads').select(
-        `
-          *,
-          creator:created_by (
-            id,
-            username,
-            full_name,
-            avatar_url
-          ),
-          forum:forum_id (
-            id,
-            title,
-            icon
-          )
-        `,
-        { count: 'exact' },
-      )
-
-      // Apply filters
-      if (filters?.forumId) {
-        query = query.eq('forum_id', filters.forumId)
-      }
-      if (filters?.creatorId) {
-        query = query.eq('created_by', filters.creatorId)
-      }
-      if (filters?.search) {
-        query = query.ilike('title', `%${filters.search}%`)
-      }
-
-      // Apply pagination
-      if (filters?.limit) {
-        query = query.limit(filters.limit)
-      }
-      if (filters?.offset) {
-        query = query.range(
-          filters.offset,
-          filters.offset + (filters.limit || 10) - 1,
-        )
-      }
-
-      // Order by created_at desc
-      query = query.order('created_at', { ascending: false })
-
-      const { data, error, count } = await query
-      if (error) throw error
-
-      return { data, count }
-    },
+    queryFn: () => threadService.getThreads(filters),
     staleTime: 5 * 60 * 1000, // 5 minutes for thread lists
   })
 }
@@ -148,46 +77,7 @@ export function useThreadsByForum(
 ) {
   return useQuery({
     queryKey: queryKeys.threads.byForum(forumId),
-    queryFn: async () => {
-      let query = supabase
-        .from('threads')
-        .select(
-          `
-          *,
-          creator:created_by (
-            id,
-            username,
-            full_name,
-            avatar_url
-          )
-        `,
-        )
-        .eq('forum_id', forumId)
-        .order('created_at', { ascending: false })
-
-      if (options?.limit) {
-        query = query.limit(options.limit)
-      }
-      if (options?.offset) {
-        query = query.range(
-          options.offset,
-          options.offset + (options.limit || 20) - 1,
-        )
-      }
-
-      const { data, error } = await query
-      if (error) throw error
-      return data as Array<
-        Thread & {
-          creator: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-        }
-      >
-    },
+    queryFn: () => threadService.getThreadsByForum(forumId, options),
     enabled: !!forumId,
     staleTime: 3 * 60 * 1000, // 3 minutes for forum threads (more frequent updates)
   })
@@ -196,33 +86,7 @@ export function useThreadsByForum(
 export function useThreadsByCreator(creatorId: string) {
   return useQuery({
     queryKey: queryKeys.threads.byCreator(creatorId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('threads')
-        .select(
-          `
-          *,
-          forum:forum_id (
-            id,
-            title,
-            icon
-          )
-        `,
-        )
-        .eq('created_by', creatorId)
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      return data as Array<
-        Thread & {
-          forum: {
-            id: string
-            title: string
-            icon: string | null
-          } | null
-        }
-      >
-    },
+    queryFn: () => threadService.getThreadsByCreator(creatorId),
     enabled: !!creatorId,
     staleTime: 5 * 60 * 1000, // 5 minutes for creator threads
   })
@@ -231,46 +95,7 @@ export function useThreadsByCreator(creatorId: string) {
 export function useSearchThreads(searchQuery: string) {
   return useQuery({
     queryKey: queryKeys.threads.search(searchQuery),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('threads')
-        .select(
-          `
-          *,
-          creator:created_by (
-            id,
-            username,
-            full_name,
-            avatar_url
-          ),
-          forum:forum_id (
-            id,
-            title,
-            icon
-          )
-        `,
-        )
-        .ilike('title', `%${searchQuery}%`)
-        .order('created_at', { ascending: false })
-        .limit(20) // Limit search results for mobile performance
-
-      if (error) throw error
-      return data as Array<
-        Thread & {
-          creator: {
-            id: string
-            username: string | null
-            full_name: string | null
-            avatar_url: string | null
-          } | null
-          forum: {
-            id: string
-            title: string
-            icon: string | null
-          } | null
-        }
-      >
-    },
+    queryFn: () => threadService.searchThreads(searchQuery),
     enabled: !!searchQuery && searchQuery.length >= 2,
     staleTime: 5 * 60 * 1000, // 5 minutes for search results
   })
@@ -281,43 +106,8 @@ export function useCreateThread() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (threadData: ThreadInsert) => {
-      const { data, error } = await supabase
-        .from('threads')
-        .insert(threadData)
-        .select(
-          `
-          *,
-          creator:created_by (
-            id,
-            username,
-            full_name,
-            avatar_url
-          ),
-          forum:forum_id (
-            id,
-            title,
-            icon
-          )
-        `,
-        )
-        .single()
-
-      if (error) throw error
-      return data as Thread & {
-        creator: {
-          id: string
-          username: string | null
-          full_name: string | null
-          avatar_url: string | null
-        } | null
-        forum: {
-          id: string
-          title: string
-          icon: string | null
-        } | null
-      }
-    },
+    mutationFn: (threadData: ThreadInsert) =>
+      threadService.createThread(threadData),
     onMutate: async (newData: ThreadInsert) => {
       // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: queryKeys.threads.lists() })
@@ -388,47 +178,8 @@ export function useUpdateThread() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({
-      id,
-      ...updateData
-    }: ThreadUpdate & { id: string }) => {
-      const { data, error } = await supabase
-        .from('threads')
-        .update(updateData)
-        .eq('id', id)
-        .select(
-          `
-          *,
-          creator:created_by (
-            id,
-            username,
-            full_name,
-            avatar_url
-          ),
-          forum:forum_id (
-            id,
-            title,
-            icon
-          )
-        `,
-        )
-        .single()
-
-      if (error) throw error
-      return data as Thread & {
-        creator: {
-          id: string
-          username: string | null
-          full_name: string | null
-          avatar_url: string | null
-        } | null
-        forum: {
-          id: string
-          title: string
-          icon: string | null
-        } | null
-      }
-    },
+    mutationFn: ({ id, ...updateData }: ThreadUpdate & { id: string }) =>
+      threadService.updateThread(id, updateData),
     onMutate: async (variables: ThreadUpdate & { id: string }) => {
       // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: queryKeys.threads.lists() })
@@ -475,8 +226,7 @@ export function useDeleteThread() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from('threads').delete().eq('id', id)
-      if (error) throw error
+      await threadService.deleteThread(id)
       return id
     },
     onMutate: async (id: string) => {

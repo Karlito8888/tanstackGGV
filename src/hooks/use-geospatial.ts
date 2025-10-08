@@ -1,7 +1,7 @@
 // Geospatial utility hooks for map features
 // Using TanStack Query best practices with mobile-first optimizations
 import { useQuery } from '@tanstack/react-query'
-import { supabase } from '../lib/supabase'
+import { geospatialService } from '../services/geospatial.service'
 
 // Types for geospatial data
 export interface LocationCoordinates {
@@ -42,13 +42,7 @@ export function useLocationCoordinates(locationId?: string) {
       : ['geospatial', 'location-coords', ''],
     queryFn: async () => {
       if (!locationId) return null
-
-      const { data, error } = await supabase.rpc('get_location_coordinates', {
-        location_id: locationId,
-      })
-
-      if (error) throw error
-      return data as LocationCoordinates | null
+      return geospatialService.getLocationCoordinates(locationId)
     },
     enabled: !!locationId,
     staleTime: 15 * 60 * 1000, // 15 minutes for location coordinates
@@ -63,10 +57,7 @@ export function useLocationsWithCoords() {
   return useQuery({
     queryKey: ['geospatial', 'locations-with-coords'],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_locations_with_coords')
-
-      if (error) throw error
-      return data as Array<LocationWithCoords>
+      return geospatialService.getLocationsWithCoords()
     },
     staleTime: 10 * 60 * 1000, // 10 minutes for locations list
   })
@@ -80,12 +71,7 @@ export function useAssociatedLocationsWithCoords() {
   return useQuery({
     queryKey: ['geospatial', 'associated-locations-with-coords'],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc(
-        'get_associated_locations_with_coords',
-      )
-
-      if (error) throw error
-      return data as Array<AssociatedLocationWithCoords>
+      return geospatialService.getAssociatedLocationsWithCoords()
     },
     staleTime: 5 * 60 * 1000, // 5 minutes for associated locations (more dynamic)
   })
@@ -102,13 +88,7 @@ export function useUserHomeLocation(userId?: string) {
       : ['geospatial', 'user-home-location', ''],
     queryFn: async () => {
       if (!userId) return null
-
-      const { data, error } = await supabase.rpc('get_user_home_location', {
-        user_profile_id: userId,
-      })
-
-      if (error) throw error
-      return data as string | null
+      return geospatialService.getUserHomeLocation(userId)
     },
     enabled: !!userId,
     staleTime: 10 * 60 * 1000, // 10 minutes for home location
